@@ -1,2 +1,0 @@
-activation,depth,width,optimizer,lr,steps_per_stage,rollout_lengths,batch_size,eval_every,grad_clip,seed,steps_completed,best_step,status,parameters,train_rmse,test_rmse,zero_test_rmse,checkpoint
-relu,4,16,adam,0.001,100,16/32/64,32,100,1.0,42,300,300,completed,897,0.005119254953707218,0.008984544162045756,0.060491854406981314,runs\cleanup_check\relu_d4_w16\trial_01\best.pt
