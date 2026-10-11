@@ -1,0 +1,5 @@
+activation,depth,width,optimizer,lr,steps_per_stage,rollout_lengths,batch_size,eval_every,grad_clip,seed,steps_completed,best_step,status,parameters,train_rmse,test_rmse,zero_test_rmse,checkpoint
+relu,2,32,adam,0.001,300,16/32/64,32,300,1.0,42,900,600,completed,1217,0.0039584868358414444,0.009268227712416316,0.060491854406981314,runs\relu_wider\relu_d2_w32\trial_01\best.pt
+relu,2,32,adam,0.0003,500,16/32/128,32,300,1.0,42,1500,1200,completed,1217,0.0036045667194943183,0.00899313915060189,0.060491854406981314,runs\relu_wider\relu_d2_w32\trial_02\best.pt
+relu,2,32,sgd,0.01,300,16/32/64,32,300,1.0,42,900,900,completed,1217,0.008541176645089833,0.009445007405080318,0.060491854406981314,runs\relu_wider\relu_d2_w32\trial_03\best.pt
+relu,2,32,sgd,0.003,500,16/32/128,32,300,1.0,42,1500,1000,completed,1217,0.005543931625894704,0.009553883386019247,0.060491854406981314,runs\relu_wider\relu_d2_w32\trial_04\best.pt
