@@ -1,0 +1,29 @@
+# Local credentials; keep only example files shareable.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Virtual environments, Python caches, and local IDE settings.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
+*.iml
+
+# Temporary files and logs.
+*.tmp
+*.temp
+*.bak
+*.log
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Keep homework datasets, models, and recorded experiment runs available to commit.

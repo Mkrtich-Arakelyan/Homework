@@ -1,10 +1,16 @@
+import csv
+import json
 from pathlib import Path
 import re
 import subprocess
 import sys
 import traceback
+from uuid import uuid4
 
+import numpy as np
 from langchain_core.tools import BaseTool, tool
+
+from bench import SimulatedBench, run_focusing_search
 
 
 RUN_TIMEOUT_SECONDS = 300
@@ -73,3 +79,123 @@ def create_coding_tool(work_dir: str | Path) -> BaseTool:
             }
 
     return write_and_run
+
+
+def _save_camera_image(image, path, target, focus_size, enhancement, title, vmax):
+    """Save a camera image with the shared colour scale and focus outline."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+
+    figure, axes = plt.subplots(figsize=(6, 5), layout="constrained")
+    try:
+        camera = axes.imshow(image, cmap="viridis", vmin=0, vmax=vmax, origin="upper")
+        row, column = target
+        half = focus_size // 2
+        axes.add_patch(Rectangle(
+            (column - half - 0.5, row - half - 0.5), focus_size, focus_size,
+            fill=False, edgecolor="red", linewidth=1.5,
+        ))
+        axes.set_title(f"{title} (enhancement = {enhancement:.4f})")
+        axes.set_xlabel("Camera column")
+        axes.set_ylabel("Camera row")
+        figure.colorbar(camera, ax=axes, label="Relative intensity")
+        figure.savefig(path, dpi=150)
+    finally:
+        plt.close(figure)
+
+
+def create_focusing_tool(work_dir: str | Path, bench: SimulatedBench) -> BaseTool:
+    """Create a focusing tool that reuses the supplied bench for every call."""
+    directory = Path(work_dir).resolve()
+
+    @tool
+    def run_focusing_experiment(
+        macropixel_size: int,
+        focus_size: int,
+        background_size: int,
+        iterations: int,
+        search_seed: int = 0,
+    ) -> dict:
+        """Perform a real numerical search on the simulated optical bench.
+
+        Macropixel size must divide both DMD dimensions and leave at least
+        two controllable macropixels. Focus and background sizes must be
+        positive odd integers, with background larger than focus; both
+        squares must fit around the fixed target. Enhancement is focus mean
+        intensity divided by the mean of the four background-region means.
+        Measurements include noise, so improvement is not guaranteed.
+        Use 1 to 1,000 iterations. Output paths are generated internally.
+        """
+        try:
+            if iterations > 1000:
+                raise ValueError("iterations must not exceed 1,000 per call.")
+            grid_shape = bench.macropixel_shape(macropixel_size)
+            if grid_shape[0] * grid_shape[1] < 2:
+                raise ValueError("macropixel_size must leave at least two controllable blocks.")
+            result = run_focusing_search(
+                bench, macropixel_size, focus_size, background_size,
+                iterations, search_seed=search_seed,
+            )
+
+            experiment_id = f"experiment_{uuid4().hex}"
+            experiment_dir = directory / experiment_id
+            experiment_dir.mkdir(parents=True, exist_ok=False)
+            paths = {
+                "initial_camera": str(experiment_dir / "initial_camera.png"),
+                "final_camera": str(experiment_dir / "final_camera.png"),
+                "final_pattern": str(experiment_dir / "final_pattern.npy"),
+                "results_json": str(experiment_dir / "results.json"),
+                "experiments_csv": str(directory / "experiments.csv"),
+            }
+            vmax = float(max(result["initial_image"].max(), result["final_image"].max()))
+            for stage in ("initial", "final"):
+                _save_camera_image(
+                    result[f"{stage}_image"], paths[f"{stage}_camera"],
+                    bench.target_position, focus_size, result[f"{stage}_enhancement"],
+                    f"{stage.capitalize()} camera", vmax,
+                )
+            np.save(paths["final_pattern"], result["final_pattern"], allow_pickle=False)
+
+            summary = {
+                "experiment_id": experiment_id,
+                "settings": result["settings"],
+                "initial_enhancement": result["initial_enhancement"],
+                "final_enhancement": result["final_enhancement"],
+                "focus_mean": result["focus_mean"],
+                "background_means": result["background_means"],
+                "background_reference": result["background_reference"],
+                "paths": paths,
+            }
+            record = {**summary, "history": result["history"]}
+            Path(paths["results_json"]).write_text(
+                json.dumps(record, indent=2, allow_nan=False), encoding="utf-8"
+            )
+
+            row = {
+                "experiment_id": experiment_id,
+                **{name: result["settings"][name] for name in (
+                    "macropixel_size", "focus_size", "background_size",
+                    "iterations", "search_seed",
+                )},
+                "initial_enhancement": result["initial_enhancement"],
+                "final_enhancement": result["final_enhancement"],
+                "focus_mean": result["focus_mean"],
+                **{f"background_{name}_mean": value
+                   for name, value in result["background_means"].items()},
+                "background_reference": result["background_reference"],
+                "results_json": paths["results_json"],
+            }
+            table = Path(paths["experiments_csv"])
+            needs_header = not table.exists() or table.stat().st_size == 0
+            with table.open("a", newline="", encoding="utf-8") as file:
+                writer = csv.DictWriter(file, fieldnames=list(row))
+                if needs_header:
+                    writer.writeheader()
+                writer.writerow(row)
+            return {"ok": True, **summary}
+        except Exception as error:
+            return {"ok": False, "error": f"{type(error).__name__}: {error}"}
+
+    return run_focusing_experiment

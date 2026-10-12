@@ -1,6 +1,5 @@
 import math
 from operator import add
-import re
 from typing import Annotated, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -11,6 +10,10 @@ import agents
 
 
 MAX_DECISIONS = 8
+DECISION_LIMIT_MESSAGE = (
+    "The eight-orchestrator-decision budget was reached. "
+    "The workflow stopped without an evidence-backed finish."
+)
 
 
 class State(TypedDict, total=False):
@@ -18,62 +21,81 @@ class State(TypedDict, total=False):
     execution_results: Annotated[list[dict], add]
     decision: dict
     decision_count: int
-    test_rmse: float | None  # Volts, parsed from actual script stdout.
     stop_reason: str
 
 
-# Recognize a printed measurement, not keywords used to choose an agent.
-# Examples: Test RMSE: 0.007 V; Test free-run RMSE (mV): 7.0.
-TEST_RMSE_PATTERN = re.compile(
-    r"\btest\s+(?:free[- ]run\s+)?RMSE"
-    r"(?:\s*\((?P<label_unit>mV|V)\))?\s*[:=]\s*"
-    r"(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)"
-    r"\s*(?P<unit>mV|V)?(?=$|\s|[,;])",
-    re.IGNORECASE,
-)
-
-
-def _printed_test_rmse(state: dict) -> float | None:
-    """Read the latest valid test RMSE from successful executor tool output."""
-    for result in reversed(state.get("execution_results", [])):
-        if result["exit_code"] != 0 or result.get("timed_out", False):
+def _has_successful_focusing_result(state: dict) -> bool:
+    """Check recorded tool payloads, not scores mentioned in dialogue text."""
+    for record in state.get("execution_results", []):
+        if (
+            not isinstance(record, dict)
+            or record.get("tool_name") != "run_focusing_experiment"
+            or record.get("validation_error")
+        ):
             continue
-        matches = list(TEST_RMSE_PATTERN.finditer(result["stdout"]))
-        for match in reversed(matches):
-            unit = match.group("unit") or match.group("label_unit")
-            value = float(match.group("value"))
-            if unit and math.isfinite(value) and value >= 0:
-                return value / 1000 if unit.lower() == "mv" else value
-    return None
+        result = record.get("result")
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            continue
+        if not isinstance(result.get("experiment_id"), str) or not result["experiment_id"]:
+            continue
+        if not isinstance(result.get("settings"), dict) or not result["settings"]:
+            continue
+        scores = (result.get("initial_enhancement"), result.get("final_enhancement"))
+        try:
+            if not all(
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                for value in scores
+            ):
+                continue
+        except OverflowError:
+            continue
+        paths = result.get("paths")
+        if isinstance(paths, dict) and all(
+            isinstance(paths.get(name), str) and paths[name]
+            for name in ("initial_camera", "final_camera", "results_json")
+        ):
+            return True
+    return False
 
 
-def build_graph(llm: BaseChatModel, coding_tool: BaseTool):
-    """Connect the four roles; only the executor receives the coding tool."""
+def build_graph(
+    llm: BaseChatModel,
+    coding_tool: BaseTool,
+    focusing_tool: BaseTool,
+):
+    """Route the four roles; only the executor receives both tools."""
 
     def orchestrator_node(state: State) -> dict:
-        # Also avoid a ninth call if an already-stopped state is invoked again.
+        # After the eighth selected action completes, stop before another LLM call.
         if state.get("decision_count", 0) >= MAX_DECISIONS:
-            return {"stop_reason": "decision_limit"}
+            return {
+                "stop_reason": "decision_limit",
+                "dialogue": [{"role": "system", "text": DECISION_LIMIT_MESSAGE}],
+            }
 
         update = agents.orchestrator(state, llm)
-        rmse = _printed_test_rmse(state)
         next_role = update["decision"]["next_role"]
-        update["test_rmse"] = rmse
         update["stop_reason"] = "running"
 
-        if next_role == "finish" and rmse is not None:
-            update["stop_reason"] = "finished"
-        elif update["decision_count"] >= MAX_DECISIONS:
-            # Stop immediately after decision 8, without dispatching another role.
-            update["stop_reason"] = "decision_limit"
-            update["dialogue"][0]["text"] += "\nThe eight-decision limit has been reached."
-        elif next_role == "finish":
-            # Reject premature finish, then let the LLM choose again.
-            update["dialogue"][0]["text"] += (
-                "\nFinish blocked: no successful script run has printed a finite "
-                "test RMSE with units in stdout. Choose the next role yourself. "
-                "An executor script should print: Test RMSE: <number> V."
-            )
+        if next_role == "finish":
+            if _has_successful_focusing_result(state):
+                update["stop_reason"] = "finished"
+            else:
+                update["dialogue"].append({
+                    "role": "system",
+                    "text": (
+                        "Finish blocked: a successful run_focusing_experiment result "
+                        "with measured enhancements and saved output paths is required. "
+                        "Choose the next role yourself."
+                    ),
+                })
+                if update["decision_count"] >= MAX_DECISIONS:
+                    update["stop_reason"] = "decision_limit"
+                    update["dialogue"].append({
+                        "role": "system", "text": DECISION_LIMIT_MESSAGE,
+                    })
         return update
 
     def route(state: State) -> str:
@@ -86,7 +108,9 @@ def build_graph(llm: BaseChatModel, coding_tool: BaseTool):
     builder.add_node("orchestrator", orchestrator_node)
     builder.add_node("scientist", lambda state: agents.scientist(state, llm))
     builder.add_node("general", lambda state: agents.general(state, llm))
-    builder.add_node("executor", lambda state: agents.executor(state, llm, coding_tool))
+    builder.add_node(
+        "executor", lambda state: agents.executor(state, llm, coding_tool, focusing_tool)
+    )
 
     builder.add_edge(START, "orchestrator")
     builder.add_conditional_edges("orchestrator", route, {
