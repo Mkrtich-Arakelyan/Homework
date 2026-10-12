@@ -1,0 +1,7 @@
+Saved_value_V: 0.034322
+Target_V: 0.04
+Meets_target: Yes
+Difference_V: 0.005678
+Anomalies: None
+Comparison_line: Saved retained_test_rmse_V = 0.034322 V; Target = 0.04 V; Meets target (strictly less): Yes; Difference (Target - Saved) = 0.005678 V.
+Summary: The saved test RMSE is 0.034322 V, which is below the target of 0.04 V.
