@@ -1,0 +1,58 @@
+# Python virtual environments
+.venv/
+venv/
+
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.tox/
+.nox/
+.ipynb_checkpoints/
+
+# Local configuration and credentials (keep example files shareable)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local IDE settings
+.idea/
+.vscode/
+*.iml
+
+# Python build and coverage output
+build/
+dist/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files and local logs
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Ignore new Task 6 experiments unless explicitly selected as homework evidence.
+# Keep the source run referenced by both demonstrations, and the two demonstrations.
+/task 6/runs/*
+!/task 6/runs/20261011_170944_164751/
+!/task 6/runs/20261012_190611_631484/
+!/task 6/runs/20261012_191714_999190/
+
+# Scratch runs created from the repository root are not submission evidence.
+/runs/
+
+# Keep the datasets, source checkpoints, plots, and Task 5 evidence shareable.
